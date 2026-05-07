@@ -87,6 +87,52 @@ export function downloadAsExcel(extractedData: ExtractedData) {
     XLSX.utils.book_append_sheet(wb, ws, "LogiData_Invoice");
     XLSX.writeFile(wb, `LogiExtract_Invoice_${items.invoiceNumber || 'DOC'}.xlsx`);
 
+  } else if (extractedData.documentType === "ARRIVAL_NOTICE" && extractedData.arrivalData) {
+    const items = extractedData.arrivalData.importantItems;
+    const headers = [
+      "CONSIGNATARIO", "NOTIFICAR A", "NRO. B/L", "NAVE / VIAJE", "PUERTO DE DESCARGA",
+      "FECHA LLEGADA (ETA)", "CONTENEDORES / SELLOS", "ALMACÉN / TERMINAL", "AGENTE CARGA",
+      "GASTOS LOCALES", "TOTAL PAQUETES", "TOTAL PESO", "TOTAL VOLUMEN"
+    ];
+    const values = [
+      items.consignatario || "", items.notificarA || "", items.billOfLadingNo || "",
+      items.vesselVoyage || "", items.portOfDischarge || "", items.eta || "",
+      items.containers || "", items.warehouse || "", items.freightForwarder || "",
+      items.localCharges || "", items.totalPackages || "", items.totalWeight || "",
+      items.totalVolume || ""
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, values]);
+    
+    if (extractedData.arrivalData.tables.length > 0) {
+      let currentRow = 4;
+      extractedData.arrivalData.tables.forEach((table) => {
+        XLSX.utils.sheet_add_aoa(ws, [[table.name.toUpperCase()]], { origin: `A${currentRow}` });
+        currentRow++;
+        const tableData = [table.headers, ...table.data];
+        XLSX.utils.sheet_add_aoa(ws, tableData, { origin: `A${currentRow}` });
+        currentRow += tableData.length + 2;
+      });
+    }
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_Aviso");
+    XLSX.writeFile(wb, `LogiExtract_Aviso_${items.billOfLadingNo || 'DOC'}.xlsx`);
+
+  } else if (extractedData.documentType === "SWIFT" && extractedData.swiftData) {
+    const items = extractedData.swiftData.importantItems;
+    const headers = [
+      "SENDER BANK", "RECEIVER BANK", "ORDERING CUSTOMER", "BENEFICIARY",
+      "AMOUNT", "CURRENCY", "VALUE DATE", "REMITTANCE INFO", "REFERENCE"
+    ];
+    const values = [
+      items.senderBank || "", items.receiverBank || "", items.orderingCustomer || "",
+      items.beneficiary || "", items.amount || "", items.currency || "",
+      items.valueDate || "", items.remittanceInfo || "", items.transactionRef || ""
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, values]);
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_SWIFT");
+    XLSX.writeFile(wb, `LogiExtract_SWIFT_${items.transactionRef || 'DOC'}.xlsx`);
+
   } else if (extractedData.documentType === "COMPARISON" && extractedData.comparison) {
     // BL Data Sheet if present
     if (extractedData.blData) {
@@ -106,15 +152,39 @@ export function downloadAsExcel(extractedData: ExtractedData) {
       XLSX.utils.book_append_sheet(wb, ws, "Data_Factura");
     }
 
+    // Arrival data sheet if present
+    if (extractedData.arrivalData) {
+      const items = extractedData.arrivalData.importantItems;
+      const headers = ["FIELD", "VALUE"];
+      const rows = Object.entries(items).map(([k, v]) => [k.toUpperCase(), String(v)]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, "Data_Aviso");
+    }
+
+    // SWIFT data sheet if present
+    if (extractedData.swiftData) {
+      const items = extractedData.swiftData.importantItems;
+      const headers = ["FIELD", "VALUE"];
+      const rows = Object.entries(items).map(([k, v]) => [k.toUpperCase(), String(v)]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, "Data_SWIFT");
+    }
+
     // Comparison Sheet
-    const compHeaders = ["ITEM / CAMPO", "VALOR EN BL", "VALOR EN FACTURA", "ESTADO", "OBSERVACIÓN"];
-    const compRows = extractedData.comparison.matches.map(m => [
-      m.field,
-      m.blValue,
-      m.invoiceValue,
-      m.status,
-      m.observation
-    ]);
+    const hasArrival = !!extractedData.arrivalData;
+    const hasSwift = !!extractedData.swiftData;
+    const compHeaders = ["ITEM / CAMPO", "VALOR EN BL", "VALOR EN FACTURA"];
+    if (hasArrival) compHeaders.push("VALOR EN AVISO");
+    if (hasSwift) compHeaders.push("VALOR EN SWIFT");
+    compHeaders.push("ESTADO", "OBSERVACIÓN");
+
+    const compRows = extractedData.comparison.matches.map(m => {
+      const row = [m.field, m.blValue, m.invoiceValue];
+      if (hasArrival) row.push(m.arrivalValue || "-");
+      if (hasSwift) row.push(m.swiftValue || "-");
+      row.push(m.status, m.observation);
+      return row;
+    });
     
     const wsComp = XLSX.utils.aoa_to_sheet([["RESUMEN DE AUDITORÍA", extractedData.comparison.summary], [], compHeaders, ...compRows]);
     XLSX.utils.book_append_sheet(wb, wsComp, "COMPARATIVA");

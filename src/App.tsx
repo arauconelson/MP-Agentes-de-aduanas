@@ -25,7 +25,9 @@ import { downloadAsExcel } from './lib/excel';
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [file2, setFile2] = useState<File | null>(null); 
-  const [docType, setDocType] = useState<"BL" | "INVOICE" | "COMPARISON">("BL");
+  const [file3, setFile3] = useState<File | null>(null); 
+  const [file4, setFile4] = useState<File | null>(null); 
+  const [docType, setDocType] = useState<"BL" | "INVOICE" | "ARRIVAL_NOTICE" | "SWIFT" | "COMPARISON">("BL");
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,10 +35,10 @@ export default function App() {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       if (docType === "COMPARISON") {
-        setFile(acceptedFiles[0]);
-        if (acceptedFiles.length > 1) {
-          setFile2(acceptedFiles[1]);
-        }
+        setFile(acceptedFiles[0] || null);
+        setFile2(acceptedFiles[1] || null);
+        setFile3(acceptedFiles[2] || null);
+        setFile4(acceptedFiles[3] || null);
       } else {
         setFile(acceptedFiles[0]);
       }
@@ -62,21 +64,34 @@ export default function App() {
 
     try {
       if (docType === "COMPARISON") {
-        if (!file2) throw new Error("Por favor sube ambos documentos (BL y Factura) para la comparativa.");
+        if (!file || !file2) throw new Error("Por favor sube al menos dos documentos (ej. BL y Factura) para la comparativa.");
         
         const b64_1 = await fileToBase64(file);
         const b64_2 = await fileToBase64(file2);
         
-        // We assume 1st is BL, 2nd is Invoice for now, or just try both
-        const blResult = await extractDocumentData(b64_1, file.type, "BL");
-        const invResult = await extractDocumentData(b64_2, file2.type, "INVOICE");
+        const res1 = await extractDocumentData(b64_1, file.type, "BL");
+        const res2 = await extractDocumentData(b64_2, file2.type, "INVOICE");
         
-        const comparison = await compareDocuments(blResult.blData, invResult.invoiceData);
+        let arrivalRes = null;
+        if (file3) {
+          const b64_3 = await fileToBase64(file3);
+          arrivalRes = await extractDocumentData(b64_3, file3.type, "ARRIVAL_NOTICE");
+        }
+
+        let swiftRes = null;
+        if (file4) {
+          const b64_4 = await fileToBase64(file4);
+          swiftRes = await extractDocumentData(b64_4, file4.type, "SWIFT");
+        }
+        
+        const comparison = await compareDocuments(res1.blData, res2.invoiceData, arrivalRes?.arrivalData, swiftRes?.swiftData);
         
         setExtractedData({
           documentType: "COMPARISON",
-          blData: blResult.blData,
-          invoiceData: invResult.invoiceData,
+          blData: res1.blData,
+          invoiceData: res2.invoiceData,
+          arrivalData: arrivalRes?.arrivalData,
+          swiftData: swiftRes?.swiftData,
           comparison
         });
       } else {
@@ -106,6 +121,9 @@ export default function App() {
 
   const reset = () => {
     setFile(null);
+    setFile2(null);
+    setFile3(null);
+    setFile4(null);
     setExtractedData(null);
     setError(null);
   };
@@ -206,6 +224,18 @@ export default function App() {
                       Factura
                     </button>
                     <button
+                      onClick={() => setDocType("ARRIVAL_NOTICE")}
+                      className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "ARRIVAL_NOTICE" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Aviso
+                    </button>
+                    <button
+                      onClick={() => setDocType("SWIFT")}
+                      className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "SWIFT" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      SWIFT
+                    </button>
+                    <button
                       onClick={() => setDocType("COMPARISON")}
                       className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "COMPARISON" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                     >
@@ -222,17 +252,23 @@ export default function App() {
                     `}
                   >
                     <input {...getInputProps()} />
-                    <div className={`p-4 rounded-2xl ${file || file2 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                    <div className={`p-4 rounded-2xl ${file || file2 || file3 || file4 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
                       {file ? <CheckCircle2 size={32} /> : <Upload size={32} />}
                     </div>
                     <div className="text-center">
                       {docType === "COMPARISON" ? (
                         <>
-                          <p className="font-bold text-slate-900 text-xs">
-                            {file ? `✓ ${file.name}` : 'Subir Documento 1 (B/L)'}
+                          <p className="font-bold text-slate-900 text-[10px] md:text-xs">
+                            {file ? `✓ ${file.name}` : 'Subir Doc 1 (B/L)'}
                           </p>
-                          <p className="font-bold text-slate-900 text-xs mt-1">
-                            {file2 ? `✓ ${file2.name}` : 'Subir Documento 2 (Factura)'}
+                          <p className="font-bold text-slate-900 text-[10px] md:text-xs mt-1">
+                            {file2 ? `✓ ${file2.name}` : 'Subir Doc 2 (Factura)'}
+                          </p>
+                          <p className="font-bold text-slate-900 text-[10px] md:text-xs mt-1">
+                            {file3 ? `✓ ${file3.name}` : 'Subir Doc 3 (Opcional - Aviso)'}
+                          </p>
+                          <p className="font-bold text-slate-900 text-[10px] md:text-xs mt-1">
+                            {file4 ? `✓ ${file4.name}` : 'Subir Doc 4 (Opcional - SWIFT)'}
                           </p>
                         </>
                       ) : (
@@ -389,6 +425,29 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                    ) : extractedData?.documentType === "ARRIVAL_NOTICE" && extractedData.arrivalData ? (
+                      <div className="space-y-6">
+                        <div className="p-4 space-y-4">
+                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Datos Clave - Aviso de Llegada</p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {[
+                              { label: 'B/L Number', value: extractedData.arrivalData.importantItems.billOfLadingNo },
+                              { label: 'Nave / Viaje', value: extractedData.arrivalData.importantItems.vesselVoyage },
+                              { label: 'ETA', value: extractedData.arrivalData.importantItems.eta },
+                              { label: 'Terminal', value: extractedData.arrivalData.importantItems.warehouse },
+                              { label: 'Puerto', value: extractedData.arrivalData.importantItems.portOfDischarge },
+                              { label: 'Agente', value: extractedData.arrivalData.importantItems.freightForwarder },
+                              { label: 'Contenedores', value: extractedData.arrivalData.importantItems.containers, full: true },
+                              { label: 'Consignatario', value: extractedData.arrivalData.importantItems.consignatario, full: true },
+                            ].map((item, idx) => (
+                              <div key={idx} className={`bg-white p-3 rounded-xl border border-slate-100 shadow-sm ${item.full ? 'col-span-2 md:col-span-4' : ''}`}>
+                                <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
+                                <span className="text-xs font-semibold text-slate-800 break-words line-clamp-2">{item.value || '-'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     ) : extractedData?.documentType === "COMPARISON" && extractedData.comparison ? (
                       <div className="space-y-6">
                         <div className="p-4 space-y-4">
@@ -417,10 +476,45 @@ export default function App() {
                                     <span className="text-[9px] text-slate-400 block uppercase">Factura</span>
                                     <span className="font-medium text-slate-700">{match.invoiceValue || '-'}</span>
                                   </div>
+                                  {extractedData.arrivalData && (
+                                    <div className="col-span-2 md:col-span-1">
+                                      <span className="text-[9px] text-slate-400 block uppercase">Aviso</span>
+                                      <span className="font-medium text-slate-700">{match.arrivalValue || '-'}</span>
+                                    </div>
+                                  )}
+                                  {extractedData.swiftData && (
+                                    <div className="col-span-2 md:col-span-1">
+                                      <span className="text-[9px] text-slate-400 block uppercase">SWIFT</span>
+                                      <span className="font-medium text-slate-700">{match.swiftValue || '-'}</span>
+                                    </div>
+                                  )}
                                 </div>
                                 <p className="text-[10px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
                                   <span className="font-bold">Observación:</span> {match.observation}
                                 </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : extractedData?.documentType === "SWIFT" && extractedData.swiftData ? (
+                      <div className="space-y-6">
+                        <div className="p-4 space-y-4">
+                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Datos Clave - SWIFT / Pago</p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {[
+                              { label: 'Referencia', value: extractedData.swiftData.importantItems.transactionRef },
+                              { label: 'Importe', value: `${extractedData.swiftData.importantItems.amount} ${extractedData.swiftData.importantItems.currency}` },
+                              { label: 'Fecha Valor', value: extractedData.swiftData.importantItems.valueDate },
+                              { label: 'Banco Emisor', value: extractedData.swiftData.importantItems.senderBank },
+                              { label: 'Banco Receptor', value: extractedData.swiftData.importantItems.receiverBank },
+                              { label: 'Ordenante', value: extractedData.swiftData.importantItems.orderingCustomer, full: true },
+                              { label: 'Beneficiario', value: extractedData.swiftData.importantItems.beneficiary, full: true },
+                              { label: 'Información de Remesa', value: extractedData.swiftData.importantItems.remittanceInfo, full: true },
+                            ].map((item, idx) => (
+                              <div key={idx} className={`bg-white p-3 rounded-xl border border-slate-100 shadow-sm ${item.full ? 'col-span-2 md:col-span-4' : ''}`}>
+                                <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
+                                <span className="text-xs font-semibold text-slate-800 break-words line-clamp-2">{item.value || '-'}</span>
                               </div>
                             ))}
                           </div>

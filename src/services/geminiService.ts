@@ -41,6 +41,8 @@ export interface ComparisonResul {
     field: string;
     blValue: string;
     invoiceValue: string;
+    arrivalValue?: string;
+    swiftValue?: string;
     status: "IDENTICO" | "DIFERENTE" | "PARCIAL";
     observation: string;
   }[];
@@ -48,30 +50,40 @@ export interface ComparisonResul {
 }
 
 export interface ExtractedData {
-  documentType: "BL" | "INVOICE" | "COMPARISON";
+  documentType: "BL" | "INVOICE" | "ARRIVAL_NOTICE" | "SWIFT" | "COMPARISON";
   blData?: {
     importantItems: any;
     tables: any[];
   };
   invoiceData?: InvoiceData;
+  arrivalData?: {
+    importantItems: any;
+    tables: any[];
+  };
+  swiftData?: {
+    importantItems: any;
+    tables: any[];
+  };
   comparison?: ComparisonResul;
 }
 
-export async function compareDocuments(blData: any, invoiceData: any): Promise<ComparisonResul> {
+export async function compareDocuments(blData: any, invoiceData: any, arrivalData?: any, swiftData?: any): Promise<ComparisonResul> {
   const model = "gemini-3-flash-preview";
-  const prompt = `Compare the following two datasets extracted from a Bill of Lading and a Commercial Invoice.
-  Analyze if the data is consistent across both documents for:
-  - Shipper vs Seller
-  - Consignee vs Buyer
-  - Description of Goods
+  const prompt = `Compare the following datasets extracted from logistics and financial documents.
+  Analyze if the data is consistent across ALL provided documents for:
+  - Shipper vs Seller vs Ordering Customer (SWIFT)
+  - Consignee vs Buyer vs Arrivee vs Beneficiary (SWIFT)
+  - Description of Goods vs Remittance Info (SWIFT)
   - Quantities/Weights
-  - Total Prices/Values
-  - Numbers/References
+  - Total Prices/Values (Invoice Total vs SWIFT Amount)
+  - Numbers/References (B/L Number, Invoice Number, Booking, SWIFT Reference)
   
   BL DATA: ${JSON.stringify(blData)}
   INVOICE DATA: ${JSON.stringify(invoiceData)}
+  ${arrivalData ? `ARRIVAL NOTICE DATA: ${JSON.stringify(arrivalData)}` : ""}
+  ${swiftData ? `SWIFT DATA: ${JSON.stringify(swiftData)}` : ""}
   
-  Return a JSON object with a list of matches including field name, value in BL, value in Invoice, status (IDENTICO, DIFERENTE, PARCIAL), and a brief observation in Spanish explaining why. Include a general summary.`;
+  Return a JSON object with a list of matches including field name, value in BL, value in Invoice, ${arrivalData ? "value in Arrival Notice," : ""} ${swiftData ? "value in SWIFT," : ""} status (IDENTICO, DIFERENTE, PARCIAL), and a brief observation in Spanish explicandolo. Include a general summary.`;
 
   const response = await ai.models.generateContent({
     model,
@@ -89,6 +101,8 @@ export async function compareDocuments(blData: any, invoiceData: any): Promise<C
                 field: { type: Type.STRING },
                 blValue: { type: Type.STRING },
                 invoiceValue: { type: Type.STRING },
+                arrivalValue: { type: Type.STRING },
+                swiftValue: { type: Type.STRING },
                 status: { type: Type.STRING, enum: ["IDENTICO", "DIFERENTE", "PARCIAL"] },
                 observation: { type: Type.STRING }
               },
@@ -105,7 +119,7 @@ export async function compareDocuments(blData: any, invoiceData: any): Promise<C
   return JSON.parse(response.text?.trim() || "{}") as ComparisonResul;
 }
 
-export async function extractDocumentData(fileBase64: string, mimeType: string, type: "BL" | "INVOICE"): Promise<ExtractedData> {
+export async function extractDocumentData(fileBase64: string, mimeType: string, type: "BL" | "INVOICE" | "ARRIVAL_NOTICE" | "SWIFT"): Promise<ExtractedData> {
   const model = "gemini-3-flash-preview";
   
   let prompt = "";
@@ -137,7 +151,7 @@ export async function extractDocumentData(fileBase64: string, mimeType: string, 
     - TOTALS: Total number of packages, Total Gross Weight (KGS), and Measurement (CBM).
     
     Also, extract tabular data (Container/Seal No, No. of Packages, Description of Goods, Gross Weight, Measurement).`;
-  } else {
+  } else if (type === "INVOICE") {
     prompt = `Extract all data from this COMMERCIAL INVOICE.
     Identify and extract basic info and line items.
     
@@ -162,6 +176,36 @@ export async function extractDocumentData(fileBase64: string, mimeType: string, 
     18. Forma y condiciones de pago y descuentos.
 
     For each point, determine if it complies (CUMPLE), doesn't comply (NO CUMPLE) or is not applicable (NO APLICA), and add a brief comment in Spanish.`;
+  } else if (type === "ARRIVAL_NOTICE") {
+    prompt = `Extract all data from this AVISO DE LLEGADA (Arrival Notice).
+    Identify and extract:
+    - CONSIGNATARIO (Consignee)
+    - NOTIFICAR A (Notify Party)
+    - NRO. B/L (B/L Number)
+    - NAVE / VIAJE (Vessel/Voyage)
+    - PUERTO DE DESCARGA (Port of Discharge)
+    - FECHA DE LLEGADA / ETA (Arrival Date)
+    - CONTENEDORES / SELLOS (Containers/Seals)
+    - ALMACÉN / TERMINAL (Warehouse/Terminal)
+    - AGENTE DE CARGA (Freight Forwarder)
+    - GASTOS LOCALES (Local Charges if any)
+    - TOTAL PAQUETES / PESO / VOLUMEN
+    
+    Extract tabular data if available.`;
+  } else {
+    prompt = `Extract all data from this SWIFT MT103 / Payment Message.
+    Identify and extract:
+    - SENDER BANK (Ordering Institution)
+    - RECEIVER BANK (Beneficiary Institution)
+    - ORDERING CUSTOMER (Debtor name/address)
+    - BENEFICIARY (Creditor name/address)
+    - AMOUNT (Instructed Amount)
+    - CURRENCY
+    - VALUE DATE (Execution Date)
+    - REMITTANCE INFORMATION (Reference Message / Purpose)
+    - TRANSACTION REFERENCE (MsgId / UETR)
+    
+    Format nicely in JSON.`;
   }
 
   const responseSchema = type === "BL" ? {
@@ -212,7 +256,7 @@ export async function extractDocumentData(fileBase64: string, mimeType: string, 
       }
     },
     required: ["importantItems", "tables"]
-  } : {
+  } : type === "INVOICE" ? {
     type: Type.OBJECT,
     properties: {
       items: {
@@ -265,6 +309,72 @@ export async function extractDocumentData(fileBase64: string, mimeType: string, 
       }
     },
     required: ["items", "validation", "tables"]
+  } : type === "ARRIVAL_NOTICE" ? {
+    type: Type.OBJECT,
+    properties: {
+      importantItems: {
+        type: Type.OBJECT,
+        properties: {
+          consignatario: { type: Type.STRING },
+          notificarA: { type: Type.STRING },
+          billOfLadingNo: { type: Type.STRING },
+          vesselVoyage: { type: Type.STRING },
+          portOfDischarge: { type: Type.STRING },
+          eta: { type: Type.STRING },
+          containers: { type: Type.STRING },
+          warehouse: { type: Type.STRING },
+          freightForwarder: { type: Type.STRING },
+          localCharges: { type: Type.STRING },
+          totalPackages: { type: Type.STRING },
+          totalWeight: { type: Type.STRING },
+          totalVolume: { type: Type.STRING }
+        }
+      },
+      tables: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            headers: { type: Type.ARRAY, items: { type: Type.STRING } },
+            data: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }
+          },
+          required: ["name", "headers", "data"]
+        }
+      }
+    },
+    required: ["importantItems", "tables"]
+  } : {
+    type: Type.OBJECT,
+    properties: {
+      importantItems: {
+        type: Type.OBJECT,
+        properties: {
+          senderBank: { type: Type.STRING },
+          receiverBank: { type: Type.STRING },
+          orderingCustomer: { type: Type.STRING },
+          beneficiary: { type: Type.STRING },
+          amount: { type: Type.STRING },
+          currency: { type: Type.STRING },
+          valueDate: { type: Type.STRING },
+          remittanceInfo: { type: Type.STRING },
+          transactionRef: { type: Type.STRING }
+        }
+      },
+      tables: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            headers: { type: Type.ARRAY, items: { type: Type.STRING } },
+            data: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }
+          },
+          required: ["name", "headers", "data"]
+        }
+      }
+    },
+    required: ["importantItems", "tables"]
   };
 
   const response = await ai.models.generateContent({
@@ -280,6 +390,8 @@ export async function extractDocumentData(fileBase64: string, mimeType: string, 
   return {
     documentType: type,
     blData: type === "BL" ? parsed : undefined,
-    invoiceData: type === "INVOICE" ? parsed : undefined
+    invoiceData: type === "INVOICE" ? parsed : undefined,
+    arrivalData: type === "ARRIVAL_NOTICE" ? parsed : undefined,
+    swiftData: type === "SWIFT" ? parsed : undefined
   };
 }
