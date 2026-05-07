@@ -9,23 +9,28 @@ export function downloadAsExcel(extractedData: ExtractedData) {
   
   // Headers for the horizontal row
   const headers = [
-    "BILL OF LADING NUMBER", 
-    "NRO. BOOKING", 
+    "B/L NUMBER", 
+    "BOOKING NO", 
     "SHIPPER", 
     "CONSIGNEE", 
     "NOTIFY PARTY", 
-    "OCEAN VESSEL", 
-    "VOYAGE Nº", 
+    "VESSEL", 
+    "VOYAGE", 
     "PORT OF LOADING",
     "PORT OF DISCHARGE",
     "PLACE OF RECEIPT",
     "PLACE OF DELIVERY",
     "TYPE OF MOVE",
     "FREIGHT TERMS",
+    "PAYABLE AT",
+    "PLACE OF ISSUE",
+    "DATE OF ISSUE",
+    "SHIPPED ON BOARD DATE",
+    "NO. OF ORIGINALS",
     "TOTAL PACKAGES",
     "TOTAL GROSS WEIGHT",
     "TOTAL MEASUREMENT",
-    "DELIVERY AGENT (PARTICULARS)"
+    "DELIVERY AGENT"
   ];
 
   // Values for the row
@@ -43,6 +48,11 @@ export function downloadAsExcel(extractedData: ExtractedData) {
     items.placeOfDelivery || "",
     items.typeOfMove || "",
     items.freightTerms || "",
+    items.payableAt || "",
+    items.placeOfIssue || "",
+    items.dateOfIssue || "",
+    items.shippedOnBoardDate || "",
+    items.numberOfOriginalBLs || "",
     items.totalPackages || "",
     items.totalGrossWeight || "",
     items.totalMeasurement || "",

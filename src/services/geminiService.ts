@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export interface ExtractedData {
   importantItems: {
@@ -17,10 +17,15 @@ export interface ExtractedData {
     placeOfDelivery?: string;
     typeOfMove?: string; // e.g., FCL/FCL, CY/CY
     freightTerms?: string; // e.g., Prepaid, Collect
+    payableAt?: string; // e.g., DESTINATION
     totalPackages?: string;
     totalGrossWeight?: string;
     totalMeasurement?: string;
     deliveryAgent?: string; // FOR PARTICULARS OF DELIVERY APPLY WITH B / L TO
+    placeOfIssue?: string;
+    dateOfIssue?: string;
+    shippedOnBoardDate?: string;
+    numberOfOriginalBLs?: string;
   };
   tables: {
     name: string;
@@ -44,12 +49,21 @@ export async function extractTableData(fileBase64: string, mimeType: string): Pr
   - PORT OF DISCHARGE: Where the cargo is unloaded.
   - PLACE OF RECEIPT: Where the carrier received the goods.
   - PLACE OF DELIVERY: Where the carrier will deliver the goods.
-  - TYPE OF MOVE: e.g., CY/CY, CFS/CFS, FCL/LCL, Door-to-Door.
-  - FREIGHT TERMS: e.g., Prepaid, Collect.
+  - TYPE OF MOVE: e.g., CY/CY, CFS/CFS, FCL/LCL.
+  - FREIGHT TERMS: e.g., FREIGHT COLLECT, FREIGHT PREPAID.
+  - PAYABLE AT: Where the freight is payable (e.g. DESTINATION, SHENZHEN).
   - TOTALS: Total number of packages, total gross weight, and total measurement.
   - DELIVERY AGENT: The info mentioned in "FOR PARTICULARS OF DELIVERY APPLY WITH B / L TO" or similar.
+  - PLACE & DATE OF ISSUE: The city and date the BL was issued.
+  - SHIPPED ON BOARD DATE: The specific date the goods were loaded.
+  - NO. OF ORIGINAL B/Ls: Number of originals (e.g., THREE(3)).
   
-  Also, extract all tabular data precisely (Container numbers, seals, description of packages and goods, weights, and measurements).
+  Also, extract all tabular data precisely. Usually tables contain:
+  - Marks & Nos / Container & Seal No.
+  - No. of Packages.
+  - Description of Goods.
+  - Gross Weight.
+  - Measurement.
   
   Format the response as a JSON object strictly following the provided schema.`;
 
@@ -89,10 +103,15 @@ export async function extractTableData(fileBase64: string, mimeType: string): Pr
               placeOfDelivery: { type: Type.STRING },
               typeOfMove: { type: Type.STRING },
               freightTerms: { type: Type.STRING },
+              payableAt: { type: Type.STRING },
               totalPackages: { type: Type.STRING },
               totalGrossWeight: { type: Type.STRING },
               totalMeasurement: { type: Type.STRING },
-              deliveryAgent: { type: Type.STRING }
+              deliveryAgent: { type: Type.STRING },
+              placeOfIssue: { type: Type.STRING },
+              dateOfIssue: { type: Type.STRING },
+              shippedOnBoardDate: { type: Type.STRING },
+              numberOfOriginalBLs: { type: Type.STRING }
             }
           },
           tables: {
