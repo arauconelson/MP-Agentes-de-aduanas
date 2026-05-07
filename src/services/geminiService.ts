@@ -2,31 +2,33 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export interface ExtractedData {
-  importantItems: {
-    shipper?: string;
-    consignee?: string;
-    notifyParty?: string;
-    vesselName?: string;
-    voyageNo?: string;
-    billOfLadingNo?: string;
-    bookingNo?: string;
-    portOfLoading?: string;
-    portOfDischarge?: string;
-    placeOfReceipt?: string;
-    placeOfDelivery?: string;
-    typeOfMove?: string; // e.g., FCL/FCL, CY/CY
-    freightTerms?: string; // e.g., Prepaid, Collect
-    payableAt?: string; // e.g., DESTINATION
-    totalPackages?: string;
-    totalGrossWeight?: string;
-    totalMeasurement?: string;
-    deliveryAgent?: string; // FOR PARTICULARS OF DELIVERY APPLY WITH B / L TO
-    placeOfIssue?: string;
-    dateOfIssue?: string;
-    shippedOnBoardDate?: string;
-    numberOfOriginalBLs?: string;
+export interface InvoiceData {
+  items: {
+    invoiceNumber?: string;
+    issueDate?: string;
+    issuePlace?: string;
+    sellerName?: string;
+    sellerAddress?: string;
+    buyerName?: string;
+    buyerAddress?: string;
+    descriptionOfGoods?: string;
+    quantity?: string;
+    unitPrice?: string;
+    totalPrice?: string;
+    currency?: string;
+    incoterms?: string;
+    originOfGoods?: string;
+    paymentTerms?: string;
+    isOriginalAndDefinitive?: boolean;
+    hasNoErasures?: boolean;
+    realPriceReflected?: boolean;
   };
+  validation: {
+    index: number;
+    description: string;
+    status: "CUMPLE" | "NO CUMPLE" | "NO APLICA";
+    comment: string;
+  }[];
   tables: {
     name: string;
     headers: string[];
@@ -34,123 +36,250 @@ export interface ExtractedData {
   }[];
 }
 
-export async function extractTableData(fileBase64: string, mimeType: string): Promise<ExtractedData> {
+export interface ComparisonResul {
+  matches: {
+    field: string;
+    blValue: string;
+    invoiceValue: string;
+    status: "IDENTICO" | "DIFERENTE" | "PARCIAL";
+    observation: string;
+  }[];
+  summary: string;
+}
+
+export interface ExtractedData {
+  documentType: "BL" | "INVOICE" | "COMPARISON";
+  blData?: {
+    importantItems: any;
+    tables: any[];
+  };
+  invoiceData?: InvoiceData;
+  comparison?: ComparisonResul;
+}
+
+export async function compareDocuments(blData: any, invoiceData: any): Promise<ComparisonResul> {
   const model = "gemini-3-flash-preview";
+  const prompt = `Compare the following two datasets extracted from a Bill of Lading and a Commercial Invoice.
+  Analyze if the data is consistent across both documents for:
+  - Shipper vs Seller
+  - Consignee vs Buyer
+  - Description of Goods
+  - Quantities/Weights
+  - Total Prices/Values
+  - Numbers/References
   
-  const prompt = `Extract all data from this shipping document (Bill of Lading / Booking / Sea Waybill).
-  Identify and extract the following key fields if they are present:
-  - SHIPPER: Full name and address.
-  - CONSIGNEE: Full name and address.
-  - NOTIFY PARTY: Full name and address.
-  - VESSEL/VOYAGE: The name of the ship and voyage number.
-  - BILL OF LADING NO: The unique identifier for the B/L.
-  - BOOKING NO: The booking reference number.
-  - PORT OF LOADING: Where the cargo is loaded.
-  - PORT OF DISCHARGE: Where the cargo is unloaded.
-  - PLACE OF RECEIPT: Where the carrier received the goods.
-  - PLACE OF DELIVERY: Where the carrier will deliver the goods.
-  - TYPE OF MOVE: e.g., CY/CY, CFS/CFS, FCL/LCL.
-  - FREIGHT TERMS: e.g., FREIGHT COLLECT, FREIGHT PREPAID.
-  - PAYABLE AT: Where the freight is payable (e.g. DESTINATION, SHENZHEN).
-  - TOTALS: Total number of packages, total gross weight, and total measurement.
-  - DELIVERY AGENT: The info mentioned in "FOR PARTICULARS OF DELIVERY APPLY WITH B / L TO" or similar.
-  - PLACE & DATE OF ISSUE: The city and date the BL was issued.
-  - SHIPPED ON BOARD DATE: The specific date the goods were loaded.
-  - NO. OF ORIGINAL B/Ls: Number of originals (e.g., THREE(3)).
+  BL DATA: ${JSON.stringify(blData)}
+  INVOICE DATA: ${JSON.stringify(invoiceData)}
   
-  Also, extract all tabular data precisely. Usually tables contain:
-  - Marks & Nos / Container & Seal No.
-  - No. of Packages.
-  - Description of Goods.
-  - Gross Weight.
-  - Measurement.
-  
-  Format the response as a JSON object strictly following the provided schema.`;
+  Return a JSON object with a list of matches including field name, value in BL, value in Invoice, status (IDENTICO, DIFERENTE, PARCIAL), and a brief observation in Spanish explaining why. Include a general summary.`;
 
   const response = await ai.models.generateContent({
     model,
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              data: fileBase64,
-              mimeType: mimeType,
-            },
-          },
-          { text: prompt },
-        ],
-      },
-    ],
+    contents: [{ parts: [{ text: prompt }] }],
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
         properties: {
+          matches: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                field: { type: Type.STRING },
+                blValue: { type: Type.STRING },
+                invoiceValue: { type: Type.STRING },
+                status: { type: Type.STRING, enum: ["IDENTICO", "DIFERENTE", "PARCIAL"] },
+                observation: { type: Type.STRING }
+              },
+              required: ["field", "blValue", "invoiceValue", "status", "observation"]
+            }
+          },
+          summary: { type: Type.STRING }
+        },
+        required: ["matches", "summary"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text?.trim() || "{}") as ComparisonResul;
+}
+
+export async function extractDocumentData(fileBase64: string, mimeType: string, type: "BL" | "INVOICE"): Promise<ExtractedData> {
+  const model = "gemini-3-flash-preview";
+  
+  let prompt = "";
+  if (type === "BL") {
+    prompt = `Extract all data from this shipping document (Bill of Lading / Booking / Sea Waybill).
+    Identify and extract the following fields precisely:
+    - SHIPPER: Full name and address.
+    - BOOKING NO.
+    - B/L NO.
+    - FOR DELIVERY OF GOODS PLEASE APPLY TO: (The delivery agent info).
+    - CONSIGNEE: Full name and address.
+    - NOTIFY PARTY: Full name and address.
+    - COMBINED TRANSPORT (PRE-CARRIAGE BY)
+    - COMBINED TRANSPORT (PLACE OF RECEIPT)
+    - PORT OF LOADING
+    - PORT OF DISCHARGE
+    - VESSEL
+    - VOYAGE NO
+    - COMBINED TRANSPORT (PLACE OF DELIVERY)
+    - TYPE OF MOVE: (e.g., CY/CY, FCL/FCL).
+    - FREIGHT & CHARGES: Identify if it is FREIGHT COLLECT or PREPAID.
+    - EX. RATE (Exchange Rate).
+    - PREPAID AT.
+    - PAYABLE AT.
+    - TOTAL PREPAID.
+    - NO. OF ORIGINAL B/L (e.g. THREE(3)).
+    - PLACE AND DATE OF ISSUE.
+    - SHIPPED ON BOARD DATE.
+    - TOTALS: Total number of packages, Total Gross Weight (KGS), and Measurement (CBM).
+    
+    Also, extract tabular data (Container/Seal No, No. of Packages, Description of Goods, Gross Weight, Measurement).`;
+  } else {
+    prompt = `Extract all data from this COMMERCIAL INVOICE.
+    Identify and extract basic info and line items.
+    
+    CRITICAL: Perform a validation of the following 18 points for Importation into Peru (SUNAT Customs requirements):
+    1. Reflejar el precio realmente pagado o por pagar.
+    2. Ser un documento original y definitivo.
+    3. Ser expedida por el vendedor.
+    4. Carecer de borrones, enmendaduras o adulteraciones.
+    5. Contener número de expedición (Invoice #).
+    6. Contener fecha de expedición.
+    7. Lugar de expedición.
+    8. Nombre del vendedor.
+    9. Dirección del vendedor.
+    10. Nombre del comprador.
+    11. Dirección del comprador.
+    12. Descripción de la mercancía.
+    13. Cantidad.
+    14. Precio unitario y total.
+    15. Moneda de la transacción.
+    16. Incoterms o condiciones de entrega.
+    17. Origen de la mercancía.
+    18. Forma y condiciones de pago y descuentos.
+
+    For each point, determine if it complies (CUMPLE), doesn't comply (NO CUMPLE) or is not applicable (NO APLICA), and add a brief comment in Spanish.`;
+  }
+
+  const responseSchema = type === "BL" ? {
+    type: Type.OBJECT,
+    properties: {
           importantItems: {
             type: Type.OBJECT,
             properties: {
               shipper: { type: Type.STRING },
+              bookingNo: { type: Type.STRING },
+              billOfLadingNo: { type: Type.STRING },
+              deliveryAgent: { type: Type.STRING },
               consignee: { type: Type.STRING },
               notifyParty: { type: Type.STRING },
-              vesselName: { type: Type.STRING },
-              voyageNo: { type: Type.STRING },
-              billOfLadingNo: { type: Type.STRING },
-              bookingNo: { type: Type.STRING },
+              preCarriageBy: { type: Type.STRING },
+              placeOfReceipt: { type: Type.STRING },
               portOfLoading: { type: Type.STRING },
               portOfDischarge: { type: Type.STRING },
-              placeOfReceipt: { type: Type.STRING },
+              vesselName: { type: Type.STRING },
+              voyageNo: { type: Type.STRING },
               placeOfDelivery: { type: Type.STRING },
               typeOfMove: { type: Type.STRING },
               freightTerms: { type: Type.STRING },
+              exchangeRate: { type: Type.STRING },
+              prepaidAt: { type: Type.STRING },
               payableAt: { type: Type.STRING },
+              totalPrepaid: { type: Type.STRING },
               totalPackages: { type: Type.STRING },
               totalGrossWeight: { type: Type.STRING },
               totalMeasurement: { type: Type.STRING },
-              deliveryAgent: { type: Type.STRING },
               placeOfIssue: { type: Type.STRING },
               dateOfIssue: { type: Type.STRING },
               shippedOnBoardDate: { type: Type.STRING },
               numberOfOriginalBLs: { type: Type.STRING }
             }
           },
-          tables: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: "Display name for the table or sheet" },
-                headers: { 
-                  type: Type.ARRAY, 
-                  items: { type: Type.STRING },
-                  description: "Column headers"
-                },
-                data: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  description: "The data rows, excluding headers"
-                }
-              },
-              required: ["name", "headers", "data"]
-            }
-          }
-        },
-        required: ["importantItems", "tables"]
+      tables: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            headers: { type: Type.ARRAY, items: { type: Type.STRING } },
+            data: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }
+          },
+          required: ["name", "headers", "data"]
+        }
       }
+    },
+    required: ["importantItems", "tables"]
+  } : {
+    type: Type.OBJECT,
+    properties: {
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          invoiceNumber: { type: Type.STRING },
+          issueDate: { type: Type.STRING },
+          issuePlace: { type: Type.STRING },
+          sellerName: { type: Type.STRING },
+          sellerAddress: { type: Type.STRING },
+          buyerName: { type: Type.STRING },
+          buyerAddress: { type: Type.STRING },
+          descriptionOfGoods: { type: Type.STRING },
+          quantity: { type: Type.STRING },
+          unitPrice: { type: Type.STRING },
+          totalPrice: { type: Type.STRING },
+          currency: { type: Type.STRING },
+          incoterms: { type: Type.STRING },
+          originOfGoods: { type: Type.STRING },
+          paymentTerms: { type: Type.STRING },
+          isOriginalAndDefinitive: { type: Type.BOOLEAN },
+          hasNoErasures: { type: Type.BOOLEAN },
+          realPriceReflected: { type: Type.BOOLEAN }
+        }
+      },
+      validation: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            index: { type: Type.NUMBER },
+            description: { type: Type.STRING },
+            status: { type: Type.STRING, enum: ["CUMPLE", "NO CUMPLE", "NO APLICA"] },
+            comment: { type: Type.STRING }
+          },
+          required: ["index", "description", "status", "comment"]
+        }
+      },
+      tables: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            headers: { type: Type.ARRAY, items: { type: Type.STRING } },
+            data: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }
+          },
+          required: ["name", "headers", "data"]
+        }
+      }
+    },
+    required: ["items", "validation", "tables"]
+  };
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ parts: [{ inlineData: { data: fileBase64, mimeType: mimeType } }, { text: prompt }] }],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: responseSchema as any
     }
   });
 
-  if (!response.text) {
-    throw new Error("No se pudo extraer información del documento.");
-  }
-
-  try {
-    return JSON.parse(response.text.trim()) as ExtractedData;
-  } catch (e) {
-    console.error("Failed to parse JSON from Gemini:", response.text);
-    throw new Error("Error al procesar la respuesta de la IA.");
-  }
+  const parsed = JSON.parse(response.text?.trim() || "{}");
+  return {
+    documentType: type,
+    blData: type === "BL" ? parsed : undefined,
+    invoiceData: type === "INVOICE" ? parsed : undefined
+  };
 }

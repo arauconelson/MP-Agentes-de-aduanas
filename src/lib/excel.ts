@@ -4,83 +4,121 @@ import { ExtractedData } from '../services/geminiService';
 export function downloadAsExcel(extractedData: ExtractedData) {
   const wb = XLSX.utils.book_new();
   
-  // Create a flat structure for horizontal ordering
-  const items = extractedData.importantItems;
-  
-  // Headers for the horizontal row
-  const headers = [
-    "B/L NUMBER", 
-    "BOOKING NO", 
-    "SHIPPER", 
-    "CONSIGNEE", 
-    "NOTIFY PARTY", 
-    "VESSEL", 
-    "VOYAGE", 
-    "PORT OF LOADING",
-    "PORT OF DISCHARGE",
-    "PLACE OF RECEIPT",
-    "PLACE OF DELIVERY",
-    "TYPE OF MOVE",
-    "FREIGHT TERMS",
-    "PAYABLE AT",
-    "PLACE OF ISSUE",
-    "DATE OF ISSUE",
-    "SHIPPED ON BOARD DATE",
-    "NO. OF ORIGINALS",
-    "TOTAL PACKAGES",
-    "TOTAL GROSS WEIGHT",
-    "TOTAL MEASUREMENT",
-    "DELIVERY AGENT"
-  ];
+  if (extractedData.documentType === "BL" && extractedData.blData) {
+    const items = extractedData.blData.importantItems;
+    const headers = [
+      "B/L NUMBER", "BOOKING NO", "SHIPPER", "CONSIGNEE", "NOTIFY PARTY", "DELIVERY AGENT",
+      "PRE-CARRIAGE BY", "PLACE OF RECEIPT", "PORT OF LOADING", "PORT OF DISCHARGE", 
+      "VESSEL", "VOYAGE", "PLACE OF DELIVERY", "TYPE OF MOVE", "FREIGHT TERMS", 
+      "EX. RATE", "PREPAID AT", "PAYABLE AT", "TOTAL PREPAID", "NO. OF ORIGINALS",
+      "PLACE OF ISSUE", "DATE OF ISSUE", "SHIPPED ON BOARD DATE", 
+      "TOTAL PACKAGES", "TOTAL GROSS WEIGHT (KGS)", "TOTAL MEASUREMENT (CBM)"
+    ];
+    const values = [
+      items.billOfLadingNo || "", items.bookingNo || "", items.shipper || "", items.consignee || "", 
+      items.notifyParty || "", items.deliveryAgent || "", items.preCarriageBy || "", 
+      items.placeOfReceipt || "", items.portOfLoading || "", items.portOfDischarge || "", 
+      items.vesselName || "", items.voyageNo || "", items.placeOfDelivery || "", 
+      items.typeOfMove || "", items.freightTerms || "", items.exchangeRate || "",
+      items.prepaidAt || "", items.payableAt || "", items.totalPrepaid || "",
+      items.numberOfOriginalBLs || "", items.placeOfIssue || "", items.dateOfIssue || "", 
+      items.shippedOnBoardDate || "", items.totalPackages || "", 
+      items.totalGrossWeight || "", items.totalMeasurement || ""
+    ];
 
-  // Values for the row
-  const values = [
-    items.billOfLadingNo || "",
-    items.bookingNo || "",
-    items.shipper || "",
-    items.consignee || "",
-    items.notifyParty || "",
-    items.vesselName || "",
-    items.voyageNo || "",
-    items.portOfLoading || "",
-    items.portOfDischarge || "",
-    items.placeOfReceipt || "",
-    items.placeOfDelivery || "",
-    items.typeOfMove || "",
-    items.freightTerms || "",
-    items.payableAt || "",
-    items.placeOfIssue || "",
-    items.dateOfIssue || "",
-    items.shippedOnBoardDate || "",
-    items.numberOfOriginalBLs || "",
-    items.totalPackages || "",
-    items.totalGrossWeight || "",
-    items.totalMeasurement || "",
-    items.deliveryAgent || ""
-  ];
-
-  // We will create one sheet that has the Master Data at the top.
-  const masterData = [headers, values];
-  const ws = XLSX.utils.aoa_to_sheet(masterData);
-
-  // Add tables below the master data if they exist
-  if (extractedData.tables && extractedData.tables.length > 0) {
-    let currentRow = 4; // Leave some space after master data
+    const ws = XLSX.utils.aoa_to_sheet([headers, values]);
     
-    extractedData.tables.forEach((table) => {
-      // Add table name
-      XLSX.utils.sheet_add_aoa(ws, [[table.name.toUpperCase()]], { origin: `A${currentRow}` });
+    if (extractedData.blData.tables.length > 0) {
+      let currentRow = 4;
+      extractedData.blData.tables.forEach((table) => {
+        XLSX.utils.sheet_add_aoa(ws, [[table.name.toUpperCase()]], { origin: `A${currentRow}` });
+        currentRow++;
+        const tableData = [table.headers, ...table.data];
+        XLSX.utils.sheet_add_aoa(ws, tableData, { origin: `A${currentRow}` });
+        currentRow += tableData.length + 2;
+      });
+    }
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_BL");
+    XLSX.writeFile(wb, `LogiExtract_BL_${items.billOfLadingNo || 'DOC'}.xlsx`);
+
+  } else if (extractedData.documentType === "INVOICE" && extractedData.invoiceData) {
+    const items = extractedData.invoiceData.items;
+    const headers = [
+      "INVOICE NUMBER", "ISSUE DATE", "ISSUE PLACE", "SELLER NAME", "SELLER ADDRESS",
+      "BUYER NAME", "BUYER ADDRESS", "DESCRIPTION", "QUANTITY", "UNIT PRICE", "TOTAL PRICE",
+      "CURRENCY", "INCOTERMS", "ORIGIN", "PAYMENT TERMS", "ORIGINAL/DEF?", "NO ERASURES?", "REAL PRICE?"
+    ];
+    
+    const missingMsg = "No tiene esos datos";
+    const values = [
+      items.invoiceNumber || missingMsg, items.issueDate || missingMsg, items.issuePlace || missingMsg,
+      items.sellerName || missingMsg, items.sellerAddress || missingMsg, items.buyerName || missingMsg,
+      items.buyerAddress || missingMsg, items.descriptionOfGoods || missingMsg, items.quantity || missingMsg,
+      items.unitPrice || missingMsg, items.totalPrice || missingMsg, items.currency || missingMsg,
+      items.incoterms || missingMsg, items.originOfGoods || missingMsg, items.paymentTerms || missingMsg,
+      items.isOriginalAndDefinitive !== undefined ? (items.isOriginalAndDefinitive ? "SÍ" : "NO") : missingMsg,
+      items.hasNoErasures !== undefined ? (items.hasNoErasures ? "SÍ" : "NO") : missingMsg,
+      items.realPriceReflected !== undefined ? (items.realPriceReflected ? "SÍ" : "NO") : missingMsg
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, values]);
+    
+    let currentRow = 4;
+
+    // Add validation checklist
+    if (extractedData.invoiceData.validation && extractedData.invoiceData.validation.length > 0) {
+      XLSX.utils.sheet_add_aoa(ws, [["VALORACIÓN DE REQUISITOS (ADUANAS)"]], { origin: `A${currentRow}` });
       currentRow++;
-      
-      // Add table headers and data
-      const tableData = [table.headers, ...table.data];
-      XLSX.utils.sheet_add_aoa(ws, tableData, { origin: `A${currentRow}` });
-      
-      currentRow += tableData.length + 2; // Move down for next table
-    });
+      const vHeaders = ["#", "PUNTO DE CONTROL", "ESTADO", "OBSERVACIÓN / COMENTARIO"];
+      const vData = extractedData.invoiceData.validation.map(v => [v.index, v.description, v.status, v.comment]);
+      XLSX.utils.sheet_add_aoa(ws, [vHeaders, ...vData], { origin: `A${currentRow}` });
+      currentRow += vData.length + 2;
+    }
+    
+    if (extractedData.invoiceData.tables.length > 0) {
+      extractedData.invoiceData.tables.forEach((table) => {
+        XLSX.utils.sheet_add_aoa(ws, [[table.name.toUpperCase()]], { origin: `A${currentRow}` });
+        currentRow++;
+        const tableData = [table.headers, ...table.data];
+        XLSX.utils.sheet_add_aoa(ws, tableData, { origin: `A${currentRow}` });
+        currentRow += tableData.length + 2;
+      });
+    }
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_Invoice");
+    XLSX.writeFile(wb, `LogiExtract_Invoice_${items.invoiceNumber || 'DOC'}.xlsx`);
+
+  } else if (extractedData.documentType === "COMPARISON" && extractedData.comparison) {
+    // BL Data Sheet if present
+    if (extractedData.blData) {
+      const items = extractedData.blData.importantItems;
+      const headers = ["FIELD", "VALUE"];
+      const rows = Object.entries(items).map(([k, v]) => [k.toUpperCase(), String(v)]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, "Data_BL");
+    }
+
+    // Invoice Data Sheet if present
+    if (extractedData.invoiceData) {
+      const items = extractedData.invoiceData.items;
+      const headers = ["FIELD", "VALUE"];
+      const rows = Object.entries(items).map(([k, v]) => [k.toUpperCase(), String(v)]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, "Data_Factura");
+    }
+
+    // Comparison Sheet
+    const compHeaders = ["ITEM / CAMPO", "VALOR EN BL", "VALOR EN FACTURA", "ESTADO", "OBSERVACIÓN"];
+    const compRows = extractedData.comparison.matches.map(m => [
+      m.field,
+      m.blValue,
+      m.invoiceValue,
+      m.status,
+      m.observation
+    ]);
+    
+    const wsComp = XLSX.utils.aoa_to_sheet([["RESUMEN DE AUDITORÍA", extractedData.comparison.summary], [], compHeaders, ...compRows]);
+    XLSX.utils.book_append_sheet(wb, wsComp, "COMPARATIVA");
+
+    XLSX.writeFile(wb, `Comparativa_Logistica_${new Date().getTime()}.xlsx`);
   }
-  
-  XLSX.utils.book_append_sheet(wb, ws, "LogiData");
-  
-  XLSX.writeFile(wb, `LogiExtract_BL_${items.billOfLadingNo || 'DOC'}_${new Date().getTime()}.xlsx`);
 }

@@ -19,22 +19,31 @@ import {
   Table as TableIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { extractTableData, ExtractedData } from './services/geminiService';
+import { extractDocumentData, compareDocuments, ExtractedData } from './services/geminiService';
 import { downloadAsExcel } from './lib/excel';
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
+  const [file2, setFile2] = useState<File | null>(null); 
+  const [docType, setDocType] = useState<"BL" | "INVOICE" | "COMPARISON">("BL");
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      setFile(acceptedFiles[0]);
+      if (docType === "COMPARISON") {
+        setFile(acceptedFiles[0]);
+        if (acceptedFiles.length > 1) {
+          setFile2(acceptedFiles[1]);
+        }
+      } else {
+        setFile(acceptedFiles[0]);
+      }
       setError(null);
       setExtractedData(null);
     }
-  }, []);
+  }, [docType]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -42,7 +51,7 @@ export default function App() {
       'image/*': ['.png', '.jpg', '.jpeg'],
       'application/pdf': ['.pdf']
     },
-    multiple: false
+    multiple: docType === "COMPARISON"
   } as any);
 
   const processFile = async () => {
@@ -52,9 +61,29 @@ export default function App() {
     setError(null);
 
     try {
-      const base64 = await fileToBase64(file);
-      const data = await extractTableData(base64, file.type);
-      setExtractedData(data);
+      if (docType === "COMPARISON") {
+        if (!file2) throw new Error("Por favor sube ambos documentos (BL y Factura) para la comparativa.");
+        
+        const b64_1 = await fileToBase64(file);
+        const b64_2 = await fileToBase64(file2);
+        
+        // We assume 1st is BL, 2nd is Invoice for now, or just try both
+        const blResult = await extractDocumentData(b64_1, file.type, "BL");
+        const invResult = await extractDocumentData(b64_2, file2.type, "INVOICE");
+        
+        const comparison = await compareDocuments(blResult.blData, invResult.invoiceData);
+        
+        setExtractedData({
+          documentType: "COMPARISON",
+          blData: blResult.blData,
+          invoiceData: invResult.invoiceData,
+          comparison
+        });
+      } else {
+        const base64 = await fileToBase64(file);
+        const data = await extractDocumentData(base64, file.type, docType);
+        setExtractedData(data);
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Ocurrió un error inesperado al procesar el archivo.');
@@ -162,6 +191,28 @@ export default function App() {
                   exit={{ opacity: 0, scale: 0.95 }}
                   className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-2xl shadow-blue-900/5 flex flex-col gap-6"
                 >
+                  {/* Type Selector */}
+                  <div className="flex p-1 bg-slate-100 rounded-xl">
+                    <button
+                      onClick={() => setDocType("BL")}
+                      className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "BL" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      B/L
+                    </button>
+                    <button
+                      onClick={() => setDocType("INVOICE")}
+                      className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "INVOICE" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Factura
+                    </button>
+                    <button
+                      onClick={() => setDocType("COMPARISON")}
+                      className={`flex-1 py-1.5 text-[10px] md:text-xs font-bold rounded-lg transition-all ${docType === "COMPARISON" ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Comparativa
+                    </button>
+                  </div>
+
                   <div 
                     {...getRootProps()} 
                     className={`
@@ -171,15 +222,26 @@ export default function App() {
                     `}
                   >
                     <input {...getInputProps()} />
-                    <div className={`p-4 rounded-2xl ${file ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                    <div className={`p-4 rounded-2xl ${file || file2 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
                       {file ? <CheckCircle2 size={32} /> : <Upload size={32} />}
                     </div>
                     <div className="text-center">
-                      <p className="font-bold text-slate-900">
-                        {file ? file.name : 'Subir B/L o Booking'}
-                      </p>
+                      {docType === "COMPARISON" ? (
+                        <>
+                          <p className="font-bold text-slate-900 text-xs">
+                            {file ? `✓ ${file.name}` : 'Subir Documento 1 (B/L)'}
+                          </p>
+                          <p className="font-bold text-slate-900 text-xs mt-1">
+                            {file2 ? `✓ ${file2.name}` : 'Subir Documento 2 (Factura)'}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="font-bold text-slate-900">
+                          {file ? file.name : 'Subir Documento'}
+                        </p>
+                      )}
                       <p className="text-[11px] text-slate-400 mt-1">
-                        Solo archivos PDF, PNG o JPG
+                        PDF o Imágenes aceptados
                       </p>
                     </div>
                   </div>
@@ -251,28 +313,28 @@ export default function App() {
                   </div>
 
                   <div className="max-h-[500px] overflow-auto border border-slate-50 rounded-2xl custom-scrollbar bg-slate-50/50 p-4">
-                    {extractedData && (
+                    {extractedData?.documentType === "BL" && extractedData.blData ? (
                       <div className="space-y-6">
                         <div className="p-4 space-y-4">
-                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Datos Clave del Documento</p>
+                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Datos Clave - B/L</p>
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             {[
-                              { label: 'B/L Number', value: extractedData.importantItems.billOfLadingNo },
-                              { label: 'Booking', value: extractedData.importantItems.bookingNo },
-                              { label: 'Carrier/Vessel', value: `${extractedData.importantItems.vesselName || ''} ${extractedData.importantItems.voyageNo || ''}` },
-                              { label: 'Type of Move', value: extractedData.importantItems.typeOfMove },
-                              { label: 'POL', value: extractedData.importantItems.portOfLoading },
-                              { label: 'POD', value: extractedData.importantItems.portOfDischarge },
-                              { label: 'Freight', value: extractedData.importantItems.freightTerms },
-                              { label: 'Payable At', value: extractedData.importantItems.payableAt },
-                              { label: 'Place of Issue', value: extractedData.importantItems.placeOfIssue },
-                              { label: 'Date of Issue', value: extractedData.importantItems.dateOfIssue },
-                              { label: 'Originals', value: extractedData.importantItems.numberOfOriginalBLs },
-                              { label: 'Packages', value: extractedData.importantItems.totalPackages },
-                              { label: 'Weight (KGS)', value: extractedData.importantItems.totalGrossWeight },
-                              { label: 'Measure (CBM)', value: extractedData.importantItems.totalMeasurement },
-                              { label: 'Shipper', value: extractedData.importantItems.shipper, full: true },
-                              { label: 'Consignee', value: extractedData.importantItems.consignee, full: true },
+                              { label: 'B/L Number', value: extractedData.blData.importantItems.billOfLadingNo },
+                              { label: 'Booking', value: extractedData.blData.importantItems.bookingNo },
+                              { label: 'Carrier/Vessel', value: `${extractedData.blData.importantItems.vesselName || ''} ${extractedData.blData.importantItems.voyageNo || ''}` },
+                              { label: 'Type of Move', value: extractedData.blData.importantItems.typeOfMove },
+                              { label: 'Freight', value: extractedData.blData.importantItems.freightTerms },
+                              { label: 'Payable At', value: extractedData.blData.importantItems.payableAt },
+                              { label: 'Pre-Carriage', value: extractedData.blData.importantItems.preCarriageBy },
+                              { label: 'Receipt At', value: extractedData.blData.importantItems.placeOfReceipt },
+                              { label: 'POL', value: extractedData.blData.importantItems.portOfLoading },
+                              { label: 'POD', value: extractedData.blData.importantItems.portOfDischarge },
+                              { label: 'Delivery At', value: extractedData.blData.importantItems.placeOfDelivery },
+                              { label: 'Shipped Date', value: extractedData.blData.importantItems.shippedOnBoardDate },
+                              { label: 'Shipper', value: extractedData.blData.importantItems.shipper, full: true },
+                              { label: 'Consignee', value: extractedData.blData.importantItems.consignee, full: true },
+                              { label: 'Notify Party', value: extractedData.blData.importantItems.notifyParty, full: true },
+                              { label: 'Delivery Agent', value: extractedData.blData.importantItems.deliveryAgent, full: true },
                             ].map((item, idx) => (
                               <div key={idx} className={`bg-white p-3 rounded-xl border border-slate-100 shadow-sm ${item.full ? 'col-span-2 md:col-span-4' : ''}`}>
                                 <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
@@ -281,11 +343,91 @@ export default function App() {
                             ))}
                           </div>
                         </div>
-                        
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center italic">
-                          Vista previa de tablas adicionales simplificada
-                        </p>
                       </div>
+                    ) : extractedData?.documentType === "INVOICE" && extractedData.invoiceData ? (
+                      <div className="space-y-6">
+                        <div className="p-4 space-y-4">
+                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Datos Clave - Factura</p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {[
+                              { label: 'Invoice #', value: extractedData.invoiceData.items.invoiceNumber },
+                              { label: 'Fecha', value: extractedData.invoiceData.items.issueDate },
+                              { label: 'Lugar', value: extractedData.invoiceData.items.issuePlace },
+                              { label: 'Moneda', value: extractedData.invoiceData.items.currency },
+                              { label: 'Total', value: extractedData.invoiceData.items.totalPrice },
+                              { label: 'Incoterms', value: extractedData.invoiceData.items.incoterms },
+                              { label: 'Vendedor', value: extractedData.invoiceData.items.sellerName, full: true },
+                              { label: 'Comprador', value: extractedData.invoiceData.items.buyerName, full: true },
+                            ].map((item, idx) => (
+                              <div key={idx} className={`bg-white p-3 rounded-xl border border-slate-100 shadow-sm ${item.full ? 'col-span-2 md:col-span-4' : ''}`}>
+                                <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
+                                <span className="text-xs font-semibold text-slate-800 break-words line-clamp-2">{item.value || '-'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {extractedData.invoiceData.validation && (
+                          <div className="p-4 space-y-4 border-t border-slate-100">
+                            <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Validación de Aduanas (SUNAT)</p>
+                            <div className="space-y-2">
+                              {extractedData.invoiceData.validation.map((v, i) => (
+                                <div key={i} className="flex gap-3 items-start bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                  <div className={`mt-0.5 w-5 h-5 flex items-center justify-center shrink-0 rounded-full text-[10px] font-bold ${
+                                    v.status === 'CUMPLE' ? 'bg-emerald-100 text-emerald-600' :
+                                    v.status === 'NO CUMPLE' ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500'
+                                  }`}>
+                                    {v.status === 'CUMPLE' ? '✓' : v.status === 'NO CUMPLE' ? '✗' : '-'}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-slate-800 leading-tight">{v.description}</p>
+                                    <p className="text-[10px] text-slate-500 mt-1 italic">{v.comment}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : extractedData?.documentType === "COMPARISON" && extractedData.comparison ? (
+                      <div className="space-y-6">
+                        <div className="p-4 space-y-4">
+                          <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Auditoría Comparativa</p>
+                          <div className="p-3 bg-blue-50 rounded-xl mb-4">
+                            <p className="text-xs text-blue-700 leading-relaxed italic">{extractedData.comparison.summary}</p>
+                          </div>
+                          <div className="space-y-3">
+                            {extractedData.comparison.matches.map((match, idx) => (
+                              <div key={idx} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase">{match.field}</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    match.status === 'IDENTICO' ? 'bg-emerald-100 text-emerald-700' : 
+                                    match.status === 'PARCIAL' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                                  }`}>
+                                    {match.status}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4 text-xs">
+                                  <div>
+                                    <span className="text-[9px] text-slate-400 block uppercase">B/L</span>
+                                    <span className="font-medium text-slate-700">{match.blValue || '-'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] text-slate-400 block uppercase">Factura</span>
+                                    <span className="font-medium text-slate-700">{match.invoiceValue || '-'}</span>
+                                  </div>
+                                </div>
+                                <p className="text-[10px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                  <span className="font-bold">Observación:</span> {match.observation}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-slate-400 italic">No se detectaron datos.</div>
                     )}
                   </div>
 
