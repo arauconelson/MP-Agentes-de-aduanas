@@ -1,6 +1,6 @@
 {
-  "name": "LogiExtract AI",
-  "description": "Automatización inteligente para la extracción de datos de Bill of Lading y documentos de carga.",
+  "name": "Revisor de Documentos Logísticos",
+  "description": "Digitaliza tus documentos y compáralos para minimizar errores en la gestión logística y evita multas y sanciones.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
