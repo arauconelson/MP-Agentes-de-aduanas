@@ -330,5 +330,70 @@ export function downloadAsExcel(extractedData: ExtractedData) {
 
     XLSX.utils.book_append_sheet(wb, wsUnified, "REPORTE COMPARATIVO");
     XLSX.writeFile(wb, `Reporte_Auditoria_Logistica_${new Date().getTime()}.xlsx`);
+  } else if (extractedData.documentType === "SWIFT" && extractedData.swiftData) {
+    const items = extractedData.swiftData.importantItems;
+    const finalRows: any[][] = [
+      ["REPORTE DE DIGITALIZACIÓN: MENSAJE SWIFT / PAGO"],
+      [""],
+      ["CONCEPTO", "VALOR IDENTIFICADO"],
+      ["ORDENANTE / DEUDOR:", items.orderingCustomer || "-"],
+      ["BENEFICIARIO / ACREEDOR:", items.beneficiary || "-"],
+      ["MONTO:", `${items.currency || ""} ${items.amount || ""}`],
+      ["FECHA VALOR:", items.valueDate || "-"],
+      ["BANCO EMISOR:", items.senderBank || "-"],
+      ["BANCO RECEPTOR:", items.receiverBank || "-"],
+      ["REFERENCIA:", items.transactionRef || "-"],
+      ["INFO. REMESA / CONCEPTO:", items.remittanceInfo || "-"],
+      [""]
+    ];
+
+    if (extractedData.swiftData.tables.length > 0) {
+      extractedData.swiftData.tables.forEach((table) => {
+        finalRows.push([table.name.toUpperCase()]);
+        finalRows.push(table.headers);
+        table.data.forEach(r => finalRows.push(r));
+        finalRows.push([""]);
+      });
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(finalRows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 60 }];
+    applyExecutiveStyles(ws);
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_SWIFT");
+    XLSX.writeFile(wb, `Digitalizacion_SWIFT_${new Date().getTime()}.xlsx`);
+
+  } else if (extractedData.documentType === "ARRIVAL_NOTICE" && extractedData.arrivalData) {
+    const items = extractedData.arrivalData.importantItems;
+    const finalRows: any[][] = [
+      ["REPORTE DE DIGITALIZACIÓN: AVISO DE LLEGADA"],
+      [""],
+      ["CAMPO", "INFORMACIÓN EXTRAÍDA"],
+      ["CONSIGNATARIO:", items.consignatario || "-"],
+      ["NRO. B/L:", items.billOfLadingNo || "-"],
+      ["NAVE / VIAJE:", items.vesselVoyage || "-"],
+      ["PUERTO DESCARGA:", items.portOfDischarge || "-"],
+      ["ETA / LLEGADA:", items.eta || "-"],
+      ["CONTENEDORES:", items.containers || "-"],
+      ["ALMACÉN / TERMINAL:", items.warehouse || "-"],
+      ["AGENTE CARGA:", items.freightForwarder || "-"],
+      ["PESO TOTAL:", items.totalWeight || "-"],
+      ["BULTOS:", items.totalPackages || "-"],
+      [""]
+    ];
+
+    if (extractedData.arrivalData.tables.length > 0) {
+      extractedData.arrivalData.tables.forEach((table) => {
+        finalRows.push([table.name.toUpperCase()]);
+        finalRows.push(table.headers);
+        table.data.forEach(r => finalRows.push(r));
+        finalRows.push([""]);
+      });
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(finalRows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 60 }];
+    applyExecutiveStyles(ws);
+    XLSX.utils.book_append_sheet(wb, ws, "LogiData_AVISO");
+    XLSX.writeFile(wb, `Digitalizacion_AvisoLlegada_${new Date().getTime()}.xlsx`);
   }
 }

@@ -315,6 +315,44 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Stepper Component */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <div className="flex items-center justify-between min-w-[600px] px-4">
+                  {[
+                    { id: "INVOICE", label: "Paso 1: Factura", icon: <FileText size={14} /> },
+                    { id: "BL", label: "Paso 2: BL", icon: <FileSpreadsheet size={14} /> },
+                    { id: "SWIFT", label: "Paso 3: Swift (Opc)", icon: <CheckCircle2 size={14} /> },
+                    { id: "ARRIVAL", label: "Paso 4: Aviso (Opc)", icon: <RefreshCw size={14} /> },
+                    { id: "COMPARISON", label: "Paso 5: Comparar", icon: <FileSearch size={14} /> }
+                  ].map((step, idx) => {
+                    const isCompleted = sessionResults[step.id.toLowerCase() as keyof typeof sessionResults] || (step.id === "COMPARISON" && sessionResults.invoice && sessionResults.bl);
+                    const isActive = activeModule === step.id;
+                    
+                    return (
+                      <React.Fragment key={step.id}>
+                        <div 
+                          onClick={() => { setActiveModule(step.id as any); reset(); }}
+                          className={`flex flex-col items-center gap-2 cursor-pointer transition-all ${isActive ? 'scale-110' : 'opacity-60 hover:opacity-100'}`}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${
+                            isActive ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' : 
+                            isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200 text-slate-400'
+                          }`}>
+                            {isCompleted && !isActive ? <CheckCircle2 size={16} /> : step.icon}
+                          </div>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{step.label}</span>
+                        </div>
+                        {idx < 4 && (
+                          <div className={`h-[2px] flex-1 mx-4 min-w-[20px] rounded-full transition-colors ${
+                            sessionResults[step.id.toLowerCase() as keyof typeof sessionResults] ? 'bg-emerald-200' : 'bg-slate-100'
+                          }`} />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Interaction Zone */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 {/* Upload Section */}
@@ -450,17 +488,8 @@ export default function App() {
                       
                       {activeModule === "BL" && extractedData && (
                         <div className="space-y-2 pt-2 border-t border-slate-100">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase text-center mb-1">Opciones Avanzadas (Opcional)</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase text-center mb-1">Continúa con los Pasos Opcionales</p>
                           <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => {
-                                setActiveModule("ARRIVAL");
-                                reset();
-                              }}
-                              className="py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-amber-100 transition-all"
-                            >
-                              <RefreshCw size={12} /> Aviso llegada
-                            </button>
                             <button
                               onClick={() => {
                                 setActiveModule("SWIFT");
@@ -468,7 +497,16 @@ export default function App() {
                               }}
                               className="py-2 bg-violet-50 text-violet-700 border border-violet-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-violet-100 transition-all"
                             >
-                              <CheckCircle2 size={12} /> Swift / Pago
+                              <CheckCircle2 size={12} /> Paso 3: Swift
+                            </button>
+                            <button
+                              onClick={() => {
+                                setActiveModule("ARRIVAL");
+                                reset();
+                              }}
+                              className="py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-amber-100 transition-all"
+                            >
+                              <RefreshCw size={12} /> Paso 4: Aviso
                             </button>
                           </div>
                           <button
@@ -486,38 +524,31 @@ export default function App() {
                       {(activeModule === "ARRIVAL" || activeModule === "SWIFT") && extractedData && (
                         <div className="space-y-2 pt-2 border-t border-slate-100">
                           <p className="text-[10px] font-bold text-slate-400 uppercase text-center mb-1">¿Deseas añadir otro documento?</p>
-                          <div className="grid grid-cols-1 gap-2">
-                            {activeModule === "SWIFT" ? (
-                              <button
-                                onClick={() => {
-                                  setActiveModule("ARRIVAL");
-                                  reset();
-                                }}
-                                className="py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-amber-100 transition-all"
-                              >
-                                <RefreshCw size={12} /> Añadir Aviso de llegada
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setActiveModule("SWIFT");
-                                  reset();
-                                }}
-                                className="py-2 bg-violet-50 text-violet-700 border border-violet-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-violet-100 transition-all"
-                              >
-                                <CheckCircle2 size={12} /> Añadir Swift / Pago
-                              </button>
-                            )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => {
+                                setActiveModule(activeModule === "SWIFT" ? "ARRIVAL" : "SWIFT");
+                                reset();
+                              }}
+                              className={`py-2 border rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold transition-all ${
+                                activeModule === "SWIFT" 
+                                ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" 
+                                : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"
+                              }`}
+                            >
+                              {activeModule === "SWIFT" ? <RefreshCw size={12} /> : <CheckCircle2 size={12} />} 
+                              {activeModule === "SWIFT" ? "Añadir Aviso" : "Añadir Swift"}
+                            </button>
+                            <button
+                               onClick={() => {
+                                setActiveModule("COMPARISON");
+                                reset();
+                              }}
+                              className="py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-indigo-100 transition-all"
+                            >
+                              <FileSearch size={12} /> Comparar
+                            </button>
                           </div>
-                          <button
-                            onClick={() => {
-                              setActiveModule("COMPARISON");
-                              reset();
-                            }}
-                            className="w-full mt-2 py-3 bg-indigo-600 text-white rounded-xl flex items-center justify-center gap-2 text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 active:scale-95 transition-all"
-                          >
-                            Ir a Cuadro Comparativo <FileSearch size={16} />
-                          </button>
                         </div>
                       )}
                     </div>
@@ -580,6 +611,50 @@ export default function App() {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          </div>
+                        ) : extractedData?.documentType === "SWIFT" && extractedData.swiftData ? (
+                          <div className="space-y-6">
+                            <p className="text-xs font-bold uppercase tracking-wider text-violet-600">Extracto Bancario - SWIFT MT103</p>
+                            <div className="grid grid-cols-2 gap-3">
+                              {[
+                                { label: 'Monto', value: `${extractedData.swiftData.importantItems.currency || ''} ${extractedData.swiftData.importantItems.amount || ''}`, full: true },
+                                { label: 'Fecha Valor', value: extractedData.swiftData.importantItems.valueDate },
+                                { label: 'Referencia', value: extractedData.swiftData.importantItems.transactionRef },
+                                { label: 'Banco Emisor', value: extractedData.swiftData.importantItems.senderBank },
+                                { label: 'Banco Receptor', value: extractedData.swiftData.importantItems.receiverBank },
+                                { label: 'Ordenante', value: extractedData.swiftData.importantItems.orderingCustomer, full: true },
+                                { label: 'Beneficiario', value: extractedData.swiftData.importantItems.beneficiary, full: true },
+                                { label: 'Concepto', value: extractedData.swiftData.importantItems.remittanceInfo, full: true },
+                              ].map((item, idx) => (
+                                <div key={idx} className={`bg-slate-50 p-3 rounded-xl border border-slate-100 ${item.full ? 'col-span-2' : ''}`}>
+                                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
+                                  <span className="text-xs font-semibold text-slate-800 break-words">{item.value || '-'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : extractedData?.documentType === "ARRIVAL_NOTICE" && extractedData.arrivalData ? (
+                          <div className="space-y-6">
+                            <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Extracto Logístico - Aviso de Llegada</p>
+                            <div className="grid grid-cols-2 gap-3">
+                              {[
+                                { label: 'Nro. B/L', value: extractedData.arrivalData.importantItems.billOfLadingNo },
+                                { label: 'ETA / LLEGADA', value: extractedData.arrivalData.importantItems.eta },
+                                { label: 'Vessel / Voyage', value: extractedData.arrivalData.importantItems.vesselVoyage },
+                                { label: 'Port of Discharge', value: extractedData.arrivalData.importantItems.portOfDischarge },
+                                { label: 'Consignatario', value: extractedData.arrivalData.importantItems.consignatario, full: true },
+                                { label: 'Terminal / Almacén', value: extractedData.arrivalData.importantItems.warehouse, full: true },
+                                { label: 'Containers', value: extractedData.arrivalData.importantItems.containers, full: true },
+                                { label: 'Bultos', value: extractedData.arrivalData.importantItems.totalPackages },
+                                { label: 'Peso', value: extractedData.arrivalData.importantItems.totalWeight },
+                                { label: 'Gastos Locales', value: extractedData.arrivalData.importantItems.localCharges, full: true },
+                              ].map((item, idx) => (
+                                <div key={idx} className={`bg-slate-50 p-3 rounded-xl border border-slate-100 ${item.full ? 'col-span-2' : ''}`}>
+                                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{item.label}</span>
+                                  <span className="text-xs font-semibold text-slate-800 break-words">{item.value || '-'}</span>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ) : extractedData?.documentType === "INVOICE" && extractedData.invoiceData ? (
