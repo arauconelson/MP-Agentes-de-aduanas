@@ -17,7 +17,8 @@ import {
   ArrowRight,
   RefreshCw,
   FileSearch,
-  Table as TableIcon
+  Table as TableIcon,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { extractDocumentData, compareDocuments, ExtractedData } from './services/geminiService';
@@ -38,6 +39,26 @@ export default function App() {
     swift?: any;
   }>({});
   const [error, setError] = useState<string | null>(null);
+  const [documentTimes, setDocumentTimes] = useState<{
+    invoice?: number;
+    bl?: number;
+    arrival?: number;
+    swift?: number;
+    comparison?: number;
+  }>({});
+
+  const formatDuration = (seconds: number | undefined, short = false) => {
+    if (seconds === undefined || seconds === 0) return short ? "0s" : "0 segundos";
+    if (seconds < 60) {
+      return short ? `${seconds}s` : `${seconds} segundos`;
+    }
+    const mins = Math.floor(seconds / 60);
+    const remainingSecs = seconds % 60;
+    if (short) {
+      return remainingSecs > 0 ? `${mins}m ${remainingSecs}s` : `${mins}m`;
+    }
+    return remainingSecs > 0 ? `${mins} min ${remainingSecs} s` : `${mins} min`;
+  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -83,27 +104,39 @@ export default function App() {
         let arrivalToCompare = sessionResults.arrival;
         let swiftToCompare = sessionResults.swift;
 
+        let blDuration = 0;
+        let invoiceDuration = 0;
+        let arrivalDuration = 0;
+        let swiftDuration = 0;
+
         // If files are uploaded in the comparison module, they override session data
         if (file && file2) {
+          const tBl0 = Date.now();
           const b64_1 = await fileToBase64(file);
-          const b64_2 = await fileToBase64(file2);
-          
           const res1 = await extractDocumentData(b64_1, file.type, "BL");
-          const res2 = await extractDocumentData(b64_2, file2.type, "INVOICE");
-
           blToCompare = res1.blData;
+          blDuration = Math.max(1, Math.round((Date.now() - tBl0) / 1000));
+
+          const tInv0 = Date.now();
+          const b64_2 = await fileToBase64(file2);
+          const res2 = await extractDocumentData(b64_2, file2.type, "INVOICE");
           invoiceToCompare = res2.invoiceData;
+          invoiceDuration = Math.max(1, Math.round((Date.now() - tInv0) / 1000));
 
           if (file3) {
+            const tArr0 = Date.now();
             const b64_3 = await fileToBase64(file3);
             const res3 = await extractDocumentData(b64_3, file3.type, "ARRIVAL_NOTICE");
             arrivalToCompare = res3.arrivalData;
+            arrivalDuration = Math.max(1, Math.round((Date.now() - tArr0) / 1000));
           }
 
           if (file4) {
+            const tSw0 = Date.now();
             const b64_4 = await fileToBase64(file4);
             const res4 = await extractDocumentData(b64_4, file4.type, "SWIFT");
             swiftToCompare = res4.swiftData;
+            swiftDuration = Math.max(1, Math.round((Date.now() - tSw0) / 1000));
           }
         }
 
@@ -119,8 +152,19 @@ export default function App() {
           swift: swiftToCompare
         }));
 
+        const tComp0 = Date.now();
         const comparison = await compareDocuments(blToCompare, invoiceToCompare, arrivalToCompare, swiftToCompare);
+        const comparisonDuration = Math.max(1, Math.round((Date.now() - tComp0) / 1000));
         
+        setDocumentTimes(prev => ({
+          ...prev,
+          bl: blDuration || prev.bl,
+          invoice: invoiceDuration || prev.invoice,
+          arrival: arrivalDuration || prev.arrival,
+          swift: swiftDuration || prev.swift,
+          comparison: comparisonDuration
+        }));
+
         setExtractedData({
           documentType: "COMPARISON",
           blData: blToCompare,
@@ -130,7 +174,8 @@ export default function App() {
           comparison
         });
       } else {
-        const base64 = await fileToBase64(file);
+        const startTime = Date.now();
+        const base64 = await fileToBase64(file!);
         const typeMap: Record<string, any> = {
           "BL": "BL",
           "INVOICE": "INVOICE",
@@ -138,7 +183,11 @@ export default function App() {
           "SWIFT": "SWIFT"
         };
         const docType = typeMap[activeModule];
-        const data = await extractDocumentData(base64, file.type, docType);
+        const data = await extractDocumentData(base64, file!.type, docType);
+        
+        const endTime = Date.now();
+        const durationSec = Math.max(1, Math.round((endTime - startTime) / 1000));
+
         setExtractedData(data);
 
         // Persistent Session Record
@@ -149,6 +198,14 @@ export default function App() {
           arrival: docType === "ARRIVAL_NOTICE" ? data.arrivalData : prev.arrival,
           swift: docType === "SWIFT" ? data.swiftData : prev.swift,
         }));
+
+        setDocumentTimes(prev => {
+          const key = activeModule.toLowerCase() as "invoice" | "bl" | "arrival" | "swift";
+          return {
+            ...prev,
+            [key]: durationSec
+          };
+        });
       }
     } catch (err: any) {
       console.error(err);
@@ -182,7 +239,16 @@ export default function App() {
   const hardReset = () => {
     reset();
     setSessionResults({});
+    setDocumentTimes({});
   };
+
+  const totalSystemSec: number = Object.values(documentTimes).reduce((acc: number, val: any) => acc + (val || 0), 0) as number;
+  const humanSec = 1200; // 20 minutes average baseline
+  const savedSec = Math.max(0, humanSec - totalSystemSec);
+
+  const totalSystemFormatted = formatDuration(totalSystemSec);
+  const savedFormatted = formatDuration(savedSec);
+  const savingsPct = Math.max(0, Math.min(100, Math.round((savedSec / humanSec) * 100)));
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] font-sans selection:bg-blue-100">
@@ -341,6 +407,11 @@ export default function App() {
                             {isCompleted && !isActive ? <CheckCircle2 size={16} /> : step.icon}
                           </div>
                           <span className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{step.label}</span>
+                          {documentTimes[step.id.toLowerCase() as keyof typeof documentTimes] !== undefined && (
+                            <span className="text-[9px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.25 rounded-md flex items-center gap-0.5">
+                              <Clock size={8} /> {formatDuration(documentTimes[step.id.toLowerCase() as keyof typeof documentTimes], true)}
+                            </span>
+                          )}
                         </div>
                         {idx < 4 && (
                           <div className={`h-[2px] flex-1 mx-4 min-w-[20px] rounded-full transition-colors ${
@@ -467,6 +538,20 @@ export default function App() {
                           <p className="text-[10px] text-emerald-600 italic">Los datos se han extraído siguiendo los protocolos del módulo.</p>
                         </div>
                       </div>
+
+                      {/* diagnostic review time circle representation */}
+                      {documentTimes[activeModule.toLowerCase() as keyof typeof documentTimes] !== undefined && (
+                        <div className="flex items-center gap-3.5 bg-blue-50/55 p-4 rounded-2xl border border-blue-100 shadow-sm border-dashed">
+                          <div className="w-12 h-12 rounded-full bg-blue-600 text-white flex flex-col items-center justify-center font-bold font-mono text-xs shrink-0 shadow-lg shadow-blue-100">
+                            <span className="text-[9px] uppercase tracking-wider font-sans text-blue-100 leading-none">IA</span>
+                            <span className="leading-tight mt-0.5">{documentTimes[activeModule.toLowerCase() as keyof typeof documentTimes]}s</span>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-bold text-blue-950">Tiempo de Revisión Inteligente</p>
+                            <p className="text-[10px] text-blue-700 font-medium">La IA completó el análisis de este documento en <span className="font-extrabold text-blue-800">{formatDuration(documentTimes[activeModule.toLowerCase() as keyof typeof documentTimes])}</span>.</p>
+                          </div>
+                        </div>
+                      )}
                       <button
                         onClick={() => extractedData && downloadAsExcel(extractedData)}
                         className="w-full py-3 bg-emerald-600 text-white rounded-xl flex items-center justify-center gap-2 text-sm font-bold hover:bg-emerald-700 shadow-lg shadow-emerald-200 active:scale-95 transition-all"
@@ -593,7 +678,14 @@ export default function App() {
                         {extractedData?.documentType === "BL" && extractedData.blData ? (
                            <div className="space-y-6">
                             <div className="space-y-4">
-                              <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Resultados Detallados - B/L</p>
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-bold uppercase tracking-wider text-blue-500">Resultados Detallados - B/L</p>
+                                {documentTimes.bl && (
+                                  <span className="px-2.5 py-1 text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full flex items-center gap-1.5">
+                                    ⏱️ IA: {formatDuration(documentTimes.bl)}
+                                  </span>
+                                )}
+                              </div>
                               <div className="grid grid-cols-2 gap-3">
                                 {[
                                   { label: 'B/L Number', value: extractedData.blData.importantItems.billOfLadingNo },
@@ -615,7 +707,14 @@ export default function App() {
                           </div>
                         ) : extractedData?.documentType === "SWIFT" && extractedData.swiftData ? (
                           <div className="space-y-6">
-                            <p className="text-xs font-bold uppercase tracking-wider text-violet-600">Extracto Bancario - SWIFT MT103</p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold uppercase tracking-wider text-violet-600">Extracto Bancario - SWIFT MT103</p>
+                              {documentTimes.swift && (
+                                <span className="px-2.5 py-1 text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200 rounded-full flex items-center gap-1.5">
+                                  ⏱️ IA: {formatDuration(documentTimes.swift)}
+                                </span>
+                              )}
+                            </div>
                             <div className="grid grid-cols-2 gap-3">
                               {[
                                 { label: 'Monto', value: `${extractedData.swiftData.importantItems.currency || ''} ${extractedData.swiftData.importantItems.amount || ''}`, full: true },
@@ -636,7 +735,14 @@ export default function App() {
                           </div>
                         ) : extractedData?.documentType === "ARRIVAL_NOTICE" && extractedData.arrivalData ? (
                           <div className="space-y-6">
-                            <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Extracto Logístico - Aviso de Llegada</p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Extracto Logístico - Aviso de Llegada</p>
+                              {documentTimes.arrival && (
+                                <span className="px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 rounded-full flex items-center gap-1.5">
+                                  ⏱️ IA: {formatDuration(documentTimes.arrival)}
+                                </span>
+                              )}
+                            </div>
                             <div className="grid grid-cols-2 gap-3">
                               {[
                                 { label: 'Nro. B/L', value: extractedData.arrivalData.importantItems.billOfLadingNo },
@@ -660,7 +766,14 @@ export default function App() {
                         ) : extractedData?.documentType === "INVOICE" && extractedData.invoiceData ? (
                           <div className="space-y-8">
                             <div className="space-y-4">
-                              <p className="text-xs font-bold uppercase tracking-wider text-blue-500">I. Información General de Factura</p>
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-bold uppercase tracking-wider text-blue-500">I. Información General de Factura</p>
+                                {documentTimes.invoice && (
+                                  <span className="px-2.5 py-1 text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full flex items-center gap-1.5">
+                                    ⏱️ IA: {formatDuration(documentTimes.invoice)}
+                                  </span>
+                                )}
+                              </div>
                               <div className="grid grid-cols-2 gap-3">
                                 {[
                                   { label: 'Invoice #', value: extractedData.invoiceData.items.invoiceNumber },
@@ -711,9 +824,65 @@ export default function App() {
                           </div>
                         ) : extractedData?.documentType === "COMPARISON" && extractedData.comparison ? (
                           <div className="space-y-6">
-                            <p className="text-xs font-bold uppercase tracking-wider text-blue-500 flex items-center gap-2">
-                              <FileSearch size={14} /> Auditoría Comparativa Multi-Documental
-                            </p>
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                              <p className="text-xs font-bold uppercase tracking-wider text-blue-500 flex items-center gap-2">
+                                <FileSearch size={14} /> Auditoría Comparativa Multi-Documental
+                              </p>
+                              {totalSystemSec > 0 && (
+                                <span className="px-3 py-1 text-xs font-extrabold bg-blue-50 text-blue-800 border border-blue-200 rounded-full flex items-center gap-1.5 animate-pulse">
+                                  ⚡ IA Ahorro Activo: -{savingsPct}%
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Panel de Ahorro de Tiempo de Auditoría */}
+                            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-[24px] border border-slate-800 shadow-xl relative overflow-hidden">
+                              <div className="absolute top-1/2 -right-4 -translate-y-1/2 p-8 opacity-[0.03] pointer-events-none select-none">
+                                <Clock size={160} className="text-white" />
+                              </div>
+                              
+                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                      Análisis Multi-Documental Completado
+                                    </span>
+                                  </div>
+                                  <h3 className="text-lg font-bold tracking-tight text-white md:text-xl">
+                                    ¡Comparación en Tiempo Récord!
+                                  </h3>
+                                  <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                                    Hemos consolidado y validado tus documentos logísticos en fracción de segundos. El tiempo promedio estimado para esta revisión realizada manualmente por un auditor humano es de <span className="font-bold text-slate-100">20 minutos</span>.
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-4 shrink-0 bg-white/5 p-4 rounded-2xl border border-white/10">
+                                  <div className="w-14 h-14 rounded-full border-4 border-emerald-500 flex flex-col items-center justify-center bg-indigo-950 shadow-md">
+                                    <span className="text-xs font-extrabold text-emerald-400 leading-none">{savingsPct}%</span>
+                                    <span className="text-[7px] uppercase tracking-widest text-[#94A3B8] font-bold mt-1">Ahorro</span>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase">Tiempo Total IA</p>
+                                    <p className="text-base font-extrabold text-white">{totalSystemFormatted}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-5 border-t border-slate-800 mt-5 relative z-10">
+                                <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Revisión Manual (Humana)</span>
+                                  <span className="text-base font-semibold text-slate-300">20 minutos</span>
+                                </div>
+                                <div className="bg-indigo-950/50 p-3 rounded-xl border border-indigo-900/30">
+                                  <span className="block text-[9px] font-bold text-indigo-300 uppercase tracking-wider font-semibold">Revisión IA Consolidada</span>
+                                  <span className="text-base font-extrabold text-blue-400">{totalSystemFormatted}</span>
+                                </div>
+                                <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
+                                  <span className="block text-[9px] font-bold text-emerald-400 uppercase tracking-wider font-semibold">Tiempo total ahorrado</span>
+                                  <span className="text-base font-extrabold text-emerald-400">Te has ahorrado {savedFormatted}</span>
+                                </div>
+                              </div>
+                            </div>
                             
                             <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm bg-white">
                               <table className="w-full text-left border-collapse min-w-[700px]">
